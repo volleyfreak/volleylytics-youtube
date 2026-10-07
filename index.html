@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Volleylytics Player</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; }
+  #p { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .msg { color: #ddd; font: 14px/1.5 system-ui, sans-serif; padding: 24px; }
+</style>
+</head>
+<body>
+<div id="p"></div>
+<script>
+/*
+ * Zwischenseite für den HTML-Export von Volleylytics.
+ * Eine direkt von der Festplatte geöffnete HTML-Datei (file://) darf YouTube nicht einbetten – es fehlt der Referrer.
+ * Der Export bettet deshalb diese Seite ein (?v=<YouTube-ID>); sie bettet YouTube ein und wird per postMessage gesteuert:
+ *   an den Player:  { target: "vl-player", cmd: "seek", t, play } | { cmd: "seekBy", d } | { cmd: "play" } | { cmd: "pause" }
+ *   zurück:         { source: "vl-player", type: "ready" | "error" (code) | "time" (t) | "state" (state) }
+ * Es werden keine Daten gespeichert oder weitergegeben.
+ */
+(function () {
+  "use strict";
+  var id = new URLSearchParams(location.search).get("v") || "";
+  var start = Number(new URLSearchParams(location.search).get("t") || 0);
+  var player = null, ready = false;
+  function send(m) {
+    if (window.parent === window) return;
+    m.source = "vl-player";
+    window.parent.postMessage(m, "*");
+  }
+  if (!/^[\w-]{11}$/.test(id)) {
+    document.body.innerHTML = '<p class="msg">Volleylytics Player – kein gültiges YouTube-Video angegeben (?v=…).</p>';
+    return;
+  }
+  window.onYouTubeIframeAPIReady = function () {
+    player = new YT.Player("p", {
+      videoId: id,
+      playerVars: { rel: 0, playsinline: 1, modestbranding: 1, start: Math.max(0, Math.floor(start)) },
+      events: {
+        onReady: function () { ready = true; send({ type: "ready" }); },
+        onError: function (e) { send({ type: "error", code: e.data }); },
+        onStateChange: function (e) { send({ type: "state", state: e.data }); },
+      },
+    });
+  };
+  window.addEventListener("message", function (e) {
+    var m = e.data;
+    if (!m || m.target !== "vl-player" || !ready) return;
+    if (m.cmd === "seek") {
+      player.seekTo(Math.max(0, Number(m.t) || 0), true);
+      if (m.play) player.playVideo();
+    } else if (m.cmd === "seekBy") {
+      player.seekTo(Math.max(0, player.getCurrentTime() + (Number(m.d) || 0)), true);
+    } else if (m.cmd === "play") {
+      player.playVideo();
+    } else if (m.cmd === "pause") {
+      player.pauseVideo();
+    }
+  });
+  setInterval(function () { if (ready) send({ type: "time", t: player.getCurrentTime() }); }, 150);
+  var s = document.createElement("script");
+  s.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>
